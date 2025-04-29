@@ -59,11 +59,18 @@ x-airflow-common: &airflow-common
     AIRFLOW__SMTP__SMTP_PASSWORD: "cfsrvkongsobheta"
     AIRFLOW__SMTP__SMTP_MAIL_FROM: "de.airflow@gmail.com"
 
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pymongo}
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- scikit-learn}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./raw_files:/opt/airflow/raw_files
+    - type: bind
+      source: ./clean_data
+      target: /app/clean_data
+    - type: bind
+      source: ./raw_files
+      target: /app/raw_files
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
   depends_on:
     redis:
@@ -156,6 +163,17 @@ services:
       timeout: 10s
       retries: 5
     restart: always
+  dashboard:
+    image: datascientest/dashapp:1.0.0
+    volumes:
+      - type: bind
+        source: ./clean_data
+        target: /app/clean_data
+      - type: bind
+        source: ./raw_files
+        target: /app/raw_files
+    ports:
+      - 8050:8050
 
 volumes:
   postgres-db-volume:
