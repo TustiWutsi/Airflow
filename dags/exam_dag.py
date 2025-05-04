@@ -11,6 +11,7 @@ import json
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
 
 def request_api(city_names):
     api_responses = []
@@ -65,15 +66,50 @@ def prepare_data_dict(path_to_data):
     X, y = prepare_data(path_to_data)
     return X.to_dict(), y.to_dict()
 
-def compute_model_score_from_xcom(task_instance, model, model_name):
-    X_dict, y_dict = task_instance.xcom_pull(task_ids='prepare_data')
-    X = pd.DataFrame(X_dict)
-    y = pd.DataFrame(y_dict)
+def compute_and_push_model_score(task_instance, model, model_name):
+    X, y = prepare_data('/app/clean_data/fulldata.csv')
     task_instance.xcom_push(
         key=f"{model_name}_result",
-        value=compute_model_score(X, y, model)
+        value=compute_model_score(model, X, y)
     )
 
+def train_and_save_best_model(task_instance):
+    score_lr = task_instance.xcom_pull(
+            key="linear_regression_result",
+            task_ids='model_tasks.cross_val_linear'
+        )
+    score_dt = task_instance.xcom_pull(
+            key="decision_tree_result",
+            task_ids='model_tasks.cross_val_decision_tree'
+        )
+    score_rf = task_instance.xcom_pull(
+            key="random_forest_result",
+            task_ids='model_tasks.cross_val_random_forest'
+        )
+    best_score = min(score_lr, score_dt, score_rf)
+    X, y = prepare_data('/app/clean_data/fulldata.csv')
+    os.makedirs('/app/clean_data', exist_ok=True)
+    if best_score == score_lr:
+        train_and_save_model(
+            LinearRegression(),
+            X,
+            y,
+            '/app/clean_data/best_model.pickle'
+        )
+    elif best_score == score_dt:
+        train_and_save_model(
+            DecisionTreeRegressor(),
+            X,
+            y,
+            '/app/clean_data/best_model.pickle'
+        )
+    else:
+        train_and_save_model(
+            RandomForestRegressor(),
+            X,
+            y,
+            '/app/clean_data/best_model.pickle'
+        )
 
 
 with DAG(
@@ -107,14 +143,9 @@ with DAG(
         )
 
     with TaskGroup("model_tasks") as model_tasks:
-        prepare_data_task = PythonOperator(
-        task_id='prepare_data',
-        python_callable=prepare_data_dict,
-        )
-
         compute_linear_regression_score = PythonOperator(
         task_id='cross_val_linear',
-        python_callable=compute_model_score_from_xcom,
+        python_callable=compute_and_push_model_score,
         op_kwargs={
             'model': LinearRegression(),
             'model_name': 'linear_regression'
@@ -123,12 +154,27 @@ with DAG(
 
         compute_decision_tree_regression_score = PythonOperator(
         task_id='cross_val_decision_tree',
-        python_callable=compute_model_score_from_xcom,
+        python_callable=compute_and_push_model_score,
         op_kwargs={
             'model': DecisionTreeRegressor(),
             'model_name': 'decision_tree'
         }
         )
-        
+
+        compute_random_forest_regression_score = PythonOperator(
+        task_id='cross_val_random_forest',
+        python_callable=compute_and_push_model_score,
+        op_kwargs={
+            'model': RandomForestRegressor(),
+            'model_name': 'random_forest'
+        }
+        )       
+
+    train_save_task = PythonOperator(
+            task_id=f'train_and_save_best_model_task',
+            python_callable=train_and_save_best_model
+        ) 
 
     api_request_task >> [agg_data_task_dashboard, agg_data_task_model]
+    agg_data_task_model >> model_tasks
+    model_tasks >> train_save_task
