@@ -64,7 +64,6 @@ x-airflow-common: &airflow-common
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
-    - ./raw_files:/opt/airflow/raw_files
     - type: bind
       source: ./clean_data
       target: /app/clean_data
